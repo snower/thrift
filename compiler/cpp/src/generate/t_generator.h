@@ -170,7 +170,7 @@ class t_generator {
     std::string ind = "";
     int i;
     for (i = 0; i < indent_; ++i) {
-      ind += "  ";
+      ind += "    ";
     }
     return ind;
   }

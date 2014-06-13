@@ -382,6 +382,11 @@ void t_py_generator::init_generator() {
     render_fastbinary_includes() <<
     endl << endl;
 
+  if(gen_tornado_){
+	  f_types_ <<
+		  "from tornado import gen" << endl;
+  }
+
   f_consts_ <<
     py_autogen_comment() << endl <<
     py_imports() << endl <<
@@ -863,8 +868,16 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
   const vector<t_field*>& fields = tstruct->get_members();
   vector<t_field*>::const_iterator f_iter;
 
-  indent(out) <<
-    "def read(self, iprot):" << endl;
+  if(gen_tornado_){
+	  indent(out) <<
+		"@gen.coroutine" << endl;
+	  indent(out) << 
+		  "def read(self, iprot):" << endl;
+  }
+  else{
+	  indent(out) <<
+		"def read(self, iprot):" << endl;
+  }
   indent_up();
 
   indent(out) <<
@@ -880,8 +893,14 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
     "return" << endl;
   indent_down();
 
-  indent(out) <<
-    "iprot.readStructBegin()" << endl;
+  if(gen_tornado_){
+	  indent(out) <<
+		"yield gen.Task(iprot.readStructBegin)" << endl;
+  }
+  else{
+	  indent(out) <<
+		"iprot.readStructBegin()" << endl;
+  }
 
   // Loop over reading in fields
   indent(out) <<
@@ -889,9 +908,15 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
     indent_up();
 
     // Read beginning field marker
-    indent(out) <<
-      "(fname, ftype, fid) = iprot.readFieldBegin()" << endl;
-
+	if(gen_tornado_){
+		indent(out) <<
+			"(fname, ftype, fid) = yield gen.Task(iprot.readFieldBegin)" << endl;
+	}
+	else{
+		indent(out) <<
+			"(fname, ftype, fid) = iprot.readFieldBegin()" << endl;
+	}
+    
     // Check for field STOP marker and break
     indent(out) <<
       "if ftype == TType.STOP:" << endl;
@@ -920,24 +945,50 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
       generate_deserialize_field(out, *f_iter, "self.");
       indent_down();
       out <<
-        indent() << "else:" << endl <<
-        indent() << "  iprot.skip(ftype)" << endl;
+        indent() << "else:" << endl;
+		if(gen_tornado_){
+			out <<
+				indent() << "    yield gen.Task(iprot.skip,ftype)" << endl;
+		}
+		else{
+			out <<
+				indent() << "    iprot.skip(ftype)" << endl;
+		}
       indent_down();
     }
 
     // In the default case we skip the field
     out <<
-      indent() <<  "else:" << endl <<
-      indent() <<  "  iprot.skip(ftype)" << endl;
+      indent() <<  "else:" << endl;
+	if(gen_tornado_){
+		out <<
+			indent() << "    yield gen.Task(iprot.skip,ftype)" << endl;
+	}
+	else{
+		out <<
+			indent() << "    iprot.skip(ftype)" << endl;
+	}
 
     // Read field end marker
-    indent(out) <<
-      "iprot.readFieldEnd()" << endl;
+	if(gen_tornado_){
+		indent(out) <<
+			"yield gen.Task(iprot.readFieldEnd)" << endl;
+	}
+	else{
+		indent(out) <<
+			"iprot.readFieldEnd()" << endl;
+	}
 
     indent_down();
 
-    indent(out) <<
-      "iprot.readStructEnd()" << endl;
+	if(gen_tornado_){
+		indent(out) <<
+			"yield gen.Task(iprot.readStructEnd)" << endl;
+	}
+	else{
+		indent(out) <<
+			"iprot.readStructEnd()" << endl;
+	}
 
     indent_down();
   out << endl;
@@ -1771,44 +1822,52 @@ void t_py_generator::generate_service_server(t_service* tservice) {
   if (gen_tornado_) {
     f_service_ <<
       indent() << "@gen.engine" << endl <<
-      indent() << "def process(self, transport, iprot_factory, oprot, callback):" << endl;
+      indent() << "def process(self, iprot, oprot, callback):" << endl;
     indent_up();
-    f_service_ <<
-      indent() << "# wait for a frame header" << endl <<
-      indent() << "frame = yield gen.Task(transport.readFrame)" << endl <<
-      indent() << "tr = TTransport.TMemoryBuffer(frame)" << endl <<
-      indent() << "iprot = iprot_factory.getProtocol(tr)" << endl <<
-      endl;
+	f_service_ <<
+    indent() << "(name, type, seqid) = yield gen.Task(iprot.readMessageBegin)" << endl;
+
+	// TODO(mcslee): validate message
+
+	// HOT: dictionary function lookup
+	f_service_ <<
+		indent() << "if name not in self._processMap:" << endl <<
+		indent() << "    yield gen.Task(iprot.skip,TType.STRUCT)" << endl <<
+		indent() << "    yield gen.Task(iprot.readMessageEnd)" << endl <<
+		indent() << "    x = TApplicationException(TApplicationException.UNKNOWN_METHOD, 'Unknown function %s' % (name))" << endl <<
+		indent() << "    oprot.writeMessageBegin(name, TMessageType.EXCEPTION, seqid)" << endl <<
+		indent() << "    x.write(oprot)" << endl <<
+		indent() << "    oprot.writeMessageEnd()" << endl <<
+		indent() << "    oprot.trans.flush()" << endl;
   } else {
     f_service_ <<
       indent() << "def process(self, iprot, oprot):" << endl;
     indent_up();
+	f_service_ <<
+		indent() << "(name, type, seqid) = iprot.readMessageBegin()" << endl;
+
+	// TODO(mcslee): validate message
+
+	// HOT: dictionary function lookup
+	f_service_ <<
+		indent() << "if name not in self._processMap:" << endl <<
+		indent() << "    iprot.skip(TType.STRUCT)" << endl <<
+		indent() << "    iprot.readMessageEnd()" << endl <<
+		indent() << "    x = TApplicationException(TApplicationException.UNKNOWN_METHOD, 'Unknown function %s' % (name))" << endl <<
+		indent() << "    oprot.writeMessageBegin(name, TMessageType.EXCEPTION, seqid)" << endl <<
+		indent() << "    x.write(oprot)" << endl <<
+		indent() << "    oprot.writeMessageEnd()" << endl <<
+		indent() << "    oprot.trans.flush()" << endl;
   }
-
-  f_service_ <<
-    indent() << "(name, type, seqid) = iprot.readMessageBegin()" << endl;
-
-  // TODO(mcslee): validate message
-
-  // HOT: dictionary function lookup
-  f_service_ <<
-    indent() << "if name not in self._processMap:" << endl <<
-    indent() << "  iprot.skip(TType.STRUCT)" << endl <<
-    indent() << "  iprot.readMessageEnd()" << endl <<
-    indent() << "  x = TApplicationException(TApplicationException.UNKNOWN_METHOD, 'Unknown function %s' % (name))" << endl <<
-    indent() << "  oprot.writeMessageBegin(name, TMessageType.EXCEPTION, seqid)" << endl <<
-    indent() << "  x.write(oprot)" << endl <<
-    indent() << "  oprot.writeMessageEnd()" << endl <<
-    indent() << "  oprot.trans.flush()" << endl;
 
   if (gen_twisted_) {
     f_service_ <<
-      indent() << "  return defer.succeed(None)" << endl;
+      indent() << "    return defer.succeed(None)" << endl;
   } else if (gen_tornado_) {
     // nothing
   } else {
     f_service_ <<
-      indent() << "  return" << endl;
+      indent() << "    return" << endl;
   }
 
   f_service_ <<
@@ -1816,14 +1875,14 @@ void t_py_generator::generate_service_server(t_service* tservice) {
 
   if (gen_twisted_) {
     f_service_ <<
-      indent() << "  return self._processMap[name](self, seqid, iprot, oprot)" << endl;
+      indent() << "    return self._processMap[name](self, seqid, iprot, oprot)" << endl;
   } else if (gen_tornado_) {
     f_service_ <<
-      indent() << "  yield gen.Task(self._processMap[name], self, seqid, iprot, oprot)" << endl <<
+      indent() << "    yield gen.Task(self._processMap[name], self, seqid, iprot, oprot)" << endl <<
       indent() << "callback()" << endl;
   } else {
     f_service_ <<
-      indent() << "  self._processMap[name](self, seqid, iprot, oprot)" << endl;
+      indent() << "    self._processMap[name](self, seqid, iprot, oprot)" << endl;
 
     // Read end of args field, the T_STOP, and the struct close
     f_service_ <<
@@ -1853,9 +1912,9 @@ void t_py_generator::generate_process_function(t_service* tservice,
   // Open function
   if (gen_tornado_) {
     f_service_ <<
-      indent() << "@gen.engine" << endl <<
+      indent() << "@gen.coroutine" << endl <<
       indent() << "def process_" << tfunction->get_name() <<
-                  "(self, seqid, iprot, oprot, callback):" << endl;
+                  "(self, seqid, iprot, oprot):" << endl;
   } else {
     f_service_ <<
       indent() << "def process_" << tfunction->get_name() <<
@@ -1867,10 +1926,17 @@ void t_py_generator::generate_process_function(t_service* tservice,
   string argsname = tfunction->get_name() + "_args";
   string resultname = tfunction->get_name() + "_result";
 
-  f_service_ <<
-    indent() << "args = " << argsname << "()" << endl <<
-    indent() << "args.read(iprot)" << endl <<
-    indent() << "iprot.readMessageEnd()" << endl;
+  if(gen_tornado_){
+	  f_service_ <<
+		  indent() << "args = " << argsname << "()" << endl <<
+		  indent() << "yield gen.Task(args.read,iprot)" << endl <<
+		  indent() << "yield gen.Task(iprot.readMessageEnd)" << endl;
+  }else{
+	  f_service_ <<
+		indent() << "args = " << argsname << "()" << endl <<
+		indent() << "args.read(iprot)" << endl <<
+		indent() << "iprot.readMessageEnd()" << endl;
+  }
 
   t_struct* xs = tfunction->get_xceptions();
   const std::vector<t_field*>& xceptions = xs->get_members();
@@ -1954,7 +2020,7 @@ void t_py_generator::generate_process_function(t_service* tservice,
 
       // Kinda absurd
       f_service_ <<
-        indent() << "  error.raiseException()" << endl;
+        indent() << "    error.raiseException()" << endl;
       for (x_iter = xceptions.begin(); x_iter != xceptions.end(); ++x_iter) {
         f_service_ <<
           indent() << "except " << type_name((*x_iter)->get_type()) << ", " << (*x_iter)->get_name() << ":" << endl;
@@ -1986,7 +2052,7 @@ void t_py_generator::generate_process_function(t_service* tservice,
 
       for (x_iter = xceptions.begin(); x_iter != xceptions.end(); ++x_iter) {
         f_service_ <<
-          indent() << "  if xtype == " << type_name((*x_iter)->get_type()) << ":" << endl;
+          indent() << "    if xtype == " << type_name((*x_iter)->get_type()) << ":" << endl;
         if (!tfunction->is_oneway()) {
           f_service_ <<
             indent() << "    result." << (*x_iter)->get_name() << " = value" << endl;
@@ -2044,8 +2110,7 @@ void t_py_generator::generate_process_function(t_service* tservice,
       indent() << "oprot.writeMessageBegin(\"" << tfunction->get_name() << "\", TMessageType.REPLY, seqid)" << endl <<
       indent() << "result.write(oprot)" << endl <<
       indent() << "oprot.writeMessageEnd()" << endl <<
-      indent() << "oprot.trans.flush()" << endl <<
-      indent() << "callback()" << endl;
+      indent() << "oprot.trans.flush()" << endl;
 
     // Close function
     indent_down();
@@ -2144,7 +2209,7 @@ void t_py_generator::generate_deserialize_field(ofstream &out,
     generate_deserialize_container(out, type, name);
   } else if (type->is_base_type() || type->is_enum()) {
     indent(out) <<
-      name << " = iprot.";
+		name << (gen_tornado_ ? " = yield gen.Task(iprot." : " = iprot.");
 
     if (type->is_base_type()) {
       t_base_type::t_base tbase = ((t_base_type*)type)->get_base();
@@ -2155,34 +2220,41 @@ void t_py_generator::generate_deserialize_field(ofstream &out,
         break;
       case t_base_type::TYPE_STRING:
         if (((t_base_type*)type)->is_binary() || !gen_utf8strings_) {
-          out << "readString();";
+			out << (gen_tornado_ ? "readString)" : "readString()");
         } else {
-          out << "readString().decode('utf-8')";
+			if(gen_tornado_){
+				out << "readString)" << endl;
+				indent(out) <<
+					name << "=" << name << ".decode('utf-8')" << endl;
+			}
+			else{
+				out << "readString().decode('utf-8')";
+			}
         }
         break;
       case t_base_type::TYPE_BOOL:
-        out << "readBool();";
+        out << (gen_tornado_ ? "readBool)" : "readBool()");
         break;
       case t_base_type::TYPE_BYTE:
-        out << "readByte();";
+        out << (gen_tornado_ ? "readByte)" : "readByte()");
         break;
       case t_base_type::TYPE_I16:
-        out << "readI16();";
+        out << (gen_tornado_ ? "readI16)" : "readI16()");
         break;
       case t_base_type::TYPE_I32:
-        out << "readI32();";
+        out << (gen_tornado_ ? "readI32)" : "readI32()");
         break;
       case t_base_type::TYPE_I64:
-        out << "readI64();";
+        out << (gen_tornado_ ? "readI64)" : "readI64()");
         break;
       case t_base_type::TYPE_DOUBLE:
-        out << "readDouble();";
+        out << (gen_tornado_ ? "readDouble)" : "readDouble()");
         break;
       default:
         throw "compiler error: no Python name for base type " + t_base_type::t_base_name(tbase);
       }
     } else if (type->is_enum()) {
-      out << "readI32();";
+      out << (gen_tornado_ ? "readI32)" : "readI32()");
     }
     out << endl;
 

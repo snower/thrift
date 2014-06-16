@@ -870,9 +870,9 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
 
   if(gen_tornado_){
 	  indent(out) <<
-		  "@gen.engine" << endl;
+		  "@gen.coroutine" << endl;
 	  indent(out) << 
-		  "def read(self, iprot,callback):" << endl;
+		  "def read(self, iprot):" << endl;
   }
   else{
 	  indent(out) <<
@@ -984,8 +984,6 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
 	if(gen_tornado_){
 		indent(out) <<
 			"yield gen.Task(iprot.readStructEnd)" << endl;
-		indent(out) << 
-			"IOLoop.current().add_callback(callback)" << endl;
 	}
 	else{
 		indent(out) <<
@@ -1109,7 +1107,6 @@ void t_py_generator::generate_service(t_service* tservice) {
       "from thrift.transport import TTwisted" << endl;
   } else if (gen_tornado_) {
     f_service_ << "from tornado import gen" << endl;
-	f_service_ << "from tornado.ioloop import IOLoop" << endl;
     f_service_ << "from tornado import stack_context" << endl;
   }
 

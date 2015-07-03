@@ -871,7 +871,7 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
   if(gen_tornado_){
 	  indent(out) <<
 		  "@gen.coroutine" << endl;
-	  indent(out) << 
+	  indent(out) <<
 		  "def read(self, iprot):" << endl;
   }
   else{
@@ -916,7 +916,7 @@ void t_py_generator::generate_py_struct_reader(ofstream& out,
 		indent(out) <<
 			"(fname, ftype, fid) = iprot.readFieldBegin()" << endl;
 	}
-    
+
     // Check for field STOP marker and break
     indent(out) <<
       "if ftype == TType.STOP:" << endl;
@@ -1293,7 +1293,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
 
     // Open function
     if(gen_tornado_){
-        f_service_ << 
+        f_service_ <<
            indent() << "@gen.coroutine" << endl;
     }
     indent(f_service_) <<
@@ -2002,22 +2002,7 @@ void t_py_generator::generate_process_function(t_service* tservice,
     if (!tfunction->is_oneway() && xceptions.size() > 0) {
       f_service_ <<
         endl <<
-        indent() << "def handle_exception(xtype, value, traceback):" << endl;
-
-      for (x_iter = xceptions.begin(); x_iter != xceptions.end(); ++x_iter) {
-        f_service_ <<
-          indent() << "    if xtype == " << type_name((*x_iter)->get_type()) << ":" << endl;
-        if (!tfunction->is_oneway()) {
-          f_service_ <<
-            indent() << "    result." << (*x_iter)->get_name() << " = value" << endl;
-        }
-        f_service_ <<
-          indent() << "    return True" << endl;
-      }
-
-      f_service_ <<
-        endl <<
-        indent() << "with stack_context.ExceptionStackContext(handle_exception):" << endl;
+        indent() << "try:" << endl;
       indent_up();
     }
 
@@ -2043,21 +2028,21 @@ void t_py_generator::generate_process_function(t_service* tservice,
     }
     f_service_ << ")" << endl;
 
-    if (xceptions.size() > 0) {
-      f_service_ << endl;
-    }
-
     if (!tfunction->is_oneway() && xceptions.size() > 0) {
-      indent_down();
+        indent_down();
+        for (x_iter = xceptions.begin(); x_iter != xceptions.end(); ++x_iter) {
+            f_service_ << indent() << "except " << type_name((*x_iter)->get_type()) << " as e:" << endl;
+            if (!tfunction->is_oneway()) {
+                f_service_ << indent() << "    result." << (*x_iter)->get_name() << " = e" << endl;
+            }
+            else{
+                f_service_ << indent() << "    pass" << endl;
+            }
+        }
     }
 
-    // Shortcut out here for oneway functions
-    if (tfunction->is_oneway()) {
-      f_service_ <<
-        indent() << "callback()" << endl;
-      indent_down();
-      f_service_ << endl;
-      return;
+    if (!tfunction->is_oneway()){
+        f_service_ << indent() <<endl;
     }
 
     f_service_ <<
@@ -2249,16 +2234,31 @@ void t_py_generator::generate_deserialize_container(ofstream &out,
   // Declare variables, read header
   if (ttype->is_map()) {
     out <<
-      indent() << prefix << " = {}" << endl <<
-      indent() << "(" << ktype << ", " << vtype << ", " << size << " ) = iprot.readMapBegin()" << endl;
+      indent() << prefix << " = {}" << endl;
+      if(gen_tornado_){
+          out << indent() << "(" << ktype << ", " << vtype << ", " << size << " ) = yield gen.Task(iprot.readMapBegin)" << endl;
+      }
+      else{
+          out << indent() << "(" << ktype << ", " << vtype << ", " << size << " ) = iprot.readMapBegin()" << endl;
+      }
   } else if (ttype->is_set()) {
     out <<
-      indent() << prefix << " = set()" << endl <<
-      indent() << "(" << etype << ", " << size << ") = iprot.readSetBegin()" << endl;
+      indent() << prefix << " = set()" << endl;
+      if(gen_tornado_){
+          out << indent() << "(" << etype << ", " << size << ") = yield gen.Task(iprot.readSetBegin)" << endl;
+      }
+      else{
+          out << indent() << "(" << etype << ", " << size << ") = iprot.readSetBegin()" << endl;
+      }
   } else if (ttype->is_list()) {
     out <<
-      indent() << prefix << " = []" << endl <<
-      indent() << "(" << etype << ", " << size << ") = iprot.readListBegin()" << endl;
+      indent() << prefix << " = []" << endl;
+      if(gen_tornado_){
+          out << indent() << "(" << etype << ", " << size << ") = yield gen.Task(iprot.readListBegin)" << endl;
+      }
+      else{
+          out << indent() << "(" << etype << ", " << size << ") = iprot.readListBegin()" << endl;
+      }
   }
 
   // For loop iterates over elements
@@ -2280,11 +2280,26 @@ void t_py_generator::generate_deserialize_container(ofstream &out,
 
   // Read container end
   if (ttype->is_map()) {
-    indent(out) << "iprot.readMapEnd()" << endl;
+      if(gen_tornado_){
+          indent(out) << "yield gen.Task(iprot.readMapEnd)" << endl;
+      }
+      else{
+          indent(out) << "iprot.readMapEnd()" << endl;
+      }
   } else if (ttype->is_set()) {
-    indent(out) << "iprot.readSetEnd()" << endl;
+      if(gen_tornado_){
+          indent(out) << "yield gen.Task(iprot.readSetEnd)" << endl;
+      }
+      else{
+          indent(out) << "iprot.readSetEnd()" << endl;
+      }
   } else if (ttype->is_list()) {
-    indent(out) << "iprot.readListEnd()" << endl;
+      if(gen_tornado_){
+          indent(out) << "yield gen.Task(iprot.readListEnd)" << endl;
+      }
+      else{
+          indent(out) << "iprot.readListEnd()" << endl;
+      }
   }
 }
 
